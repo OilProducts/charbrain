@@ -1,7 +1,7 @@
 import torch
 from typing import List, Dict
 
-from predictive_blocks import PredictiveBlock
+from predictive_blocks import OnlinePredictiveBlock
 
 
 class WorldModelGraph:
@@ -14,7 +14,7 @@ class WorldModelGraph:
 
     def __init__(self):
         # Store blocks by name
-        self.blocks: Dict[str, PredictiveBlock] = {}
+        self.blocks: Dict[str, OnlinePredictiveBlock] = {}
 
         # Dependencies: block_inputs[block_name] = list of block names this block depends on
         self.block_inputs: Dict[str, List[str]] = {}
@@ -26,7 +26,7 @@ class WorldModelGraph:
         # Predicted next inputs: predictions[t][block_name] = predicted input/target at timestep t
         self.predictions = {}
 
-    def add_block(self, name: str, block: PredictiveBlock, inputs: List[str]):
+    def add_block(self, name: str, block: OnlinePredictiveBlock, inputs: List[str]):
         self.blocks[name] = block
         self.block_inputs[name] = inputs
 
@@ -50,9 +50,8 @@ class WorldModelGraph:
         for block_name, block in self.blocks.items():
             # Forward pass
             block_input = inputs_dict[block_name]  # [batch_size, input_dim]
-            latent, pred = block(block_input)
+            latent = block(block_input)
             self.outputs[t][block_name] = latent
-            self.predictions[t][block_name] = pred
 
     def prepare_inputs_for_timestep(self, t: int) -> Dict[str, torch.Tensor]:
         """

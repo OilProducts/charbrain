@@ -4,67 +4,79 @@ import torch.optim as optim
 from typing import List, Dict
 
 
-class PredictiveBlock(nn.Module):
+class OnlinePredictiveBlock(nn.Module):
     """
     A predictive block that:
-      - Takes in the previous latent representation z_{t-1}.
-      - Predicts the current input X_t from z_{t-1}.
-      - Immediately computes loss w.r.t. the actual X_t, backpropagates, and updates its parameters.
-      - Finally, produces a new latent z_t by encoding the current input X_t.
+      - At each forward pass, returns a latent representation for the current input x_t.
+      - Internally, it still *predicts* x_{t+1} for the purpose of computing an auto-prediction loss,
+        but it does not return that prediction.
+      - The next time forward(x_t+1) is called, it backpropagates based on the mismatch between
+        the *previous* prediction (stored in self.last_pred) and the *current* ground truth input x_t+1.
+      - End result: you get a trained latent representation each step without externally passing around
+        the "next input" prediction.
 
-    This design puts the training step (loss computation + optimizer step) directly inside .forward().
-    While unusual, it achieves the "train on every forward call" behavior you requested.
+    forward(x_t):
+      1) If self.last_pred is not None, compute MSE(last_pred, x_t) -> backprop + step.
+      2) Encode x_t -> latent z_t
+      3) Produce a new prediction of x_{t+1}, store it as self.last_pred (internally).
+      4) Return z_t (the block’s latent representation).
     """
 
-    def __init__(self, latent_dim: int, input_dim: int, hidden_dim: int,
-                 optimizer: optim.Optimizer = optim.Adam):
+    def __init__(self, input_dim, latent_dim, learning_rate=1e-3, device='cpu'):
         super().__init__()
-        self.latent_dim = latent_dim
+        self.device = device
         self.input_dim = input_dim
+        self.latent_dim = latent_dim
+        self.output_dim = input_dim
 
-        # Example architecture:
-        #   decode z_{t-1} -> predict X_t
-        self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, input_dim)
-        )
-
-        #   encode X_t -> produce z_t
+        # Example architecture: simple MLP
+        # encoder to produce latent, decoder to produce the next input prediction
         self.encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+            nn.Linear(input_dim, latent_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, latent_dim)
+            nn.Linear(latent_dim, latent_dim),
+            nn.ReLU()
         )
+        self.decoder = nn.Linear(latent_dim, self.output_dim)
 
-        self.optimizer = optimizer(self.parameters(), lr=1e-3)
+        # Maintain the last prediction of x_t (used for training at the next forward call)
+        self.last_pred = None
+
+        # Internal optimizer
+        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
         self.loss_fn = nn.MSELoss()
 
-    def forward(self, z_prev: torch.Tensor, x_curr: torch.Tensor):
+    def forward(self, x_t: torch.Tensor) -> torch.Tensor:
         """
-        z_prev: [batch_size, latent_dim] - latent from the previous timestep
-        x_curr: [batch_size, input_dim]  - the current input/observation
+        x_t: shape [batch_size, input_dim], the current ground-truth input.
 
         Returns:
-          z_curr: new latent representation for this timestep
-          x_pred: predicted version of x_curr
-          loss:   MSE loss computed between x_pred and x_curr
+            z_t: shape [batch_size, latent_dim], the latent representation for the current input.
+
+        Internally:
+            - If self.last_pred is not None, compute loss = MSE(self.last_pred, x_t)
+              and do one optimizer step.
+            - Then encode x_t into latent z_t.
+            - Also produce a new "next input" prediction x_pred_tplus1 = decoder(z_t),
+              store it as self.last_pred for next time's training.
         """
-        # Predict current input from previous latent
-        x_pred = self.decoder(z_prev)  # shape: [batch_size, input_dim]
+        # 1) Train on the previous step's prediction if available
+        if self.last_pred is not None:
+            loss = self.loss_fn(self.last_pred, x_t)
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
 
-        # Compute loss
-        loss = self.loss_fn(x_pred, x_curr)
+        # 2) Encode x_t into latent representation z_t
+        z_t = self.encoder(x_t)
 
-        # Backpropagate immediately
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        # 3) Predict next input from z_t (for the next step's training)
+        x_pred_tplus1 = self.decoder(z_t)
+        # Detach so we don't accumulate a huge graph over many timesteps
+        self.last_pred = x_pred_tplus1.detach()
 
-        # Encode the current input to produce the new latent representation
-        z_curr = self.encoder(x_curr)  # shape: [batch_size, latent_dim]
-
-        return z_curr, x_pred, loss
+        # 4) Return the latent representation
+        return z_t
 
 
 class PolicyBlock(nn.Module):

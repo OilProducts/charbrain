@@ -5,7 +5,7 @@ from torch.distributions import Categorical
 import gymnasium as gym
 from typing import Dict
 
-from predictive_blocks import PredictiveBlock, PolicyBlock, ValueBlock
+from predictive_blocks import OnlinePredictiveBlock, PolicyBlock, ValueBlock
 from world_model import WorldModelGraph
 
 # Assuming PredictiveBlock and WorldModelGraph are already defined as above.
@@ -29,9 +29,9 @@ output_dim = obs_dim
 hidden_dim = 32
 
 # Create blocks
-blockA = PredictiveBlock(input_dim=obs_dim + latent_dim, latent_dim=latent_dim, hidden_dim=hidden_dim)
-blockB = PredictiveBlock(input_dim=latent_dim, latent_dim=latent_dim, hidden_dim=hidden_dim)
-blockC = PredictiveBlock(input_dim=latent_dim*2, latent_dim=latent_dim, hidden_dim=hidden_dim)
+blockA = OnlinePredictiveBlock(input_dim=obs_dim + latent_dim, latent_dim=latent_dim)
+blockB = OnlinePredictiveBlock(input_dim=latent_dim, latent_dim=latent_dim)
+blockC = OnlinePredictiveBlock(input_dim=latent_dim*2, latent_dim=latent_dim)
 
 # Build the graph
 graph = WorldModelGraph()
@@ -52,12 +52,17 @@ value_block = ValueBlock(latent_dim).to(device)
 # --- Step 2: Simple training loop on environment rollouts ---
 
 # Combine all params in single optimizer for simplicity
-optimizer = optim.Adam(list(graph.blocks['A'].parameters()) +
-                       list(graph.blocks['B'].parameters()) +
-                       list(graph.blocks['C'].parameters()) +
-                       list(policy_block.parameters()) +
+# optimizer = optim.Adam(list(graph.blocks['A'].parameters()) +
+#                        list(graph.blocks['B'].parameters()) +
+#                        list(graph.blocks['C'].parameters()) +
+#                        list(policy_block.parameters()) +
+#                        list(value_block.parameters()),
+#                        lr=1e-4)
+
+optimizer = optim.Adam(list(policy_block.parameters()) +
                        list(value_block.parameters()),
                        lr=1e-4)
+
 
 loss_fn = nn.MSELoss()
 
