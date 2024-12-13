@@ -13,7 +13,8 @@ from world_model import WorldModelGraph
 # --- Step 1: Create the graph with a circular dependency (temporal resolution) ---
 
 # Suppose the environment observation space is a vector (like in CartPole)
-env = gym.make('CartPole-v1')
+# env = gym.make('CartPole-v1')
+env = gym.make('LunarLander-v3')
 obs_dim = env.observation_space.shape[0]  # Should be 4 for CartPole
 action_dim = env.action_space.n
 env.reset(seed=42)
@@ -22,14 +23,15 @@ device = torch.device('cpu')
 
 
 # Block dimensions:
-latent_dim = 32
+latent_dim = 16
 # Each block will predict next observation dimension as a simplistic target
 output_dim = obs_dim
+hidden_dim = 32
 
 # Create blocks
-blockA = PredictiveBlock(input_dim=obs_dim + latent_dim, latent_dim=latent_dim, output_dim=obs_dim)
-blockB = PredictiveBlock(input_dim=latent_dim, latent_dim=latent_dim, output_dim=obs_dim)
-blockC = PredictiveBlock(input_dim=latent_dim*2, latent_dim=latent_dim, output_dim=obs_dim)
+blockA = PredictiveBlock(input_dim=obs_dim + latent_dim, latent_dim=latent_dim, hidden_dim=hidden_dim)
+blockB = PredictiveBlock(input_dim=latent_dim, latent_dim=latent_dim, hidden_dim=hidden_dim)
+blockC = PredictiveBlock(input_dim=latent_dim*2, latent_dim=latent_dim, hidden_dim=hidden_dim)
 
 # Build the graph
 graph = WorldModelGraph()
