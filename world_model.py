@@ -61,17 +61,6 @@ class WorldModelGraph:
         If t == 0, we assume these are given as initial inputs (e.g. from environment sensors).
         """
         inputs_dict = {}
-
-        # if t == 0:
-        #     # For t=0, no previous outputs exist. We must rely on external input for blocks without dependencies.
-        #     # For blocks with dependencies, either initialize them or raise an error.
-        #     # Here we’ll assume that if a block has dependencies, you must provide initial state in some way.
-        #     # Otherwise, just return an empty vector or rely on a provided initialization.
-        #     for block_name in self.blocks.keys():
-        #         # For simplicity, we expect the trainer to provide initial inputs for t=0.
-        #         # We'll just put a placeholder here:
-        #         raise RuntimeError("Initial inputs for timestep 0 must be provided externally.")
-        # else:
         for block_name in self.blocks.keys():
             deps = self.block_inputs[block_name]
             if len(deps) == 0:

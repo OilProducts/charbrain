@@ -3,10 +3,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
 import gymnasium as gym
-from typing import Dict
+from typing import Dict, List
 
 from predictive_blocks import OnlinePredictiveBlock, PolicyBlock, ValueBlock
 from world_model import WorldModelGraph
+from utils import MovingAverage
 
 # Assuming PredictiveBlock and WorldModelGraph are already defined as above.
 
@@ -28,10 +29,12 @@ latent_dim = 16
 output_dim = obs_dim
 hidden_dim = 32
 
+print(f"Observation dim: {obs_dim}, Action dim: {action_dim}")
+
 # Create blocks
-blockA = OnlinePredictiveBlock(input_dim=obs_dim + latent_dim, latent_dim=latent_dim)
-blockB = OnlinePredictiveBlock(input_dim=latent_dim, latent_dim=latent_dim)
-blockC = OnlinePredictiveBlock(input_dim=latent_dim*2, latent_dim=latent_dim)
+blockA = OnlinePredictiveBlock(input_dim=obs_dim + latent_dim, latent_dim=latent_dim, device=device)
+blockB = OnlinePredictiveBlock(input_dim=latent_dim, latent_dim=latent_dim, device=device)
+blockC = OnlinePredictiveBlock(input_dim=latent_dim*2, latent_dim=latent_dim, device=device)
 
 # Build the graph
 graph = WorldModelGraph()
@@ -52,13 +55,6 @@ value_block = ValueBlock(latent_dim).to(device)
 # --- Step 2: Simple training loop on environment rollouts ---
 
 # Combine all params in single optimizer for simplicity
-# optimizer = optim.Adam(list(graph.blocks['A'].parameters()) +
-#                        list(graph.blocks['B'].parameters()) +
-#                        list(graph.blocks['C'].parameters()) +
-#                        list(policy_block.parameters()) +
-#                        list(value_block.parameters()),
-#                        lr=1e-4)
-
 optimizer = optim.Adam(list(policy_block.parameters()) +
                        list(value_block.parameters()),
                        lr=1e-4)
@@ -67,12 +63,14 @@ optimizer = optim.Adam(list(policy_block.parameters()) +
 loss_fn = nn.MSELoss()
 
 # Training loop parameters
-num_episodes = 1000
+num_episodes = 100000
 max_steps = 2000
 gamma = 0.99
 
 graph.to(device)
 policy_block.to(device)
+
+ma = MovingAverage(window_size=100, mode='simple')
 
 for ep in range(num_episodes):
     obs, info = env.reset(seed=ep)
@@ -94,7 +92,7 @@ for ep in range(num_episodes):
 
     log_probs = []
     values = []
-    rewards = []
+    rewards: List[torch.Tensor] = []
 
     for t in range(max_steps):
         # Prepare inputs
@@ -133,6 +131,7 @@ for ep in range(num_episodes):
             break
 
     # Compute returns and advantages
+    ma.add_value(sum(rewards).item())
     returns = []
     G = 0
     for r in reversed(rewards):
@@ -161,7 +160,10 @@ for ep in range(num_episodes):
     loss.backward()
     optimizer.step()
 
-    print(f"Episode {ep}: Return={returns.sum().item():.2f}, Policy Loss={policy_loss.item():.4f}, Value Loss={value_loss.item():.4f}")
+    print(f"Episode {ep}: Reward MA={ma}, Return"
+          f"={returns.sum().item():.2f}, "
+          f"Policy Loss"
+          f"={policy_loss.item():.4f}, Value Loss={value_loss.item():.4f}")
 
 
 env.close()

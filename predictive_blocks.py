@@ -31,12 +31,18 @@ class OnlinePredictiveBlock(nn.Module):
 
         # Example architecture: simple MLP
         # encoder to produce latent, decoder to produce the next input prediction
-        self.encoder = nn.Sequential(
-            nn.Linear(input_dim, latent_dim),
-            nn.ReLU(),
-            nn.Linear(latent_dim, latent_dim),
-            nn.ReLU()
-        )
+        self.encoder = nn.TransformerDecoderLayer(d_model=latent_dim,
+                                                  nhead=1,
+                                                  bias=False,
+                                                  dim_feedforward=64)
+
+¬
+        # self.encoder = nn.Sequential(
+        #     nn.Linear(input_dim, latent_dim),
+        #     nn.ReLU(),
+        #     nn.Linear(latent_dim, latent_dim),
+        #     nn.ReLU()
+        # )
         self.decoder = nn.Linear(latent_dim, self.output_dim)
 
         # Maintain the last prediction of x_t (used for training at the next forward call)
@@ -70,13 +76,15 @@ class OnlinePredictiveBlock(nn.Module):
         # 2) Encode x_t into latent representation z_t
         z_t = self.encoder(x_t)
 
-        # 3) Predict next input from z_t (for the next step's training)
-        x_pred_tplus1 = self.decoder(z_t)
-        # Detach so we don't accumulate a huge graph over many timesteps
-        self.last_pred = x_pred_tplus1.detach()
+        # # 3) Predict next input from z_t (for the next step's training)
+        # x_pred_tplus1 = self.decoder(z_t)
+        # # Detach so we don't accumulate a huge graph over many timesteps
+        # self.last_pred = x_pred_tplus1.detach()
+
+        self.last_pred = self.decoder(z_t)
 
         # 4) Return the latent representation
-        return z_t
+        return z_t.detach()
 
 
 class PolicyBlock(nn.Module):
