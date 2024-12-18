@@ -22,9 +22,9 @@ env.reset(seed=42)
 
 device = torch.device('cpu')
 
-
 # Block dimensions:
 latent_dim = 16
+depth_of_thought = 16
 # Each block will predict next observation dimension as a simplistic target
 output_dim = obs_dim
 hidden_dim = 32
@@ -32,9 +32,10 @@ hidden_dim = 32
 print(f"Observation dim: {obs_dim}, Action dim: {action_dim}")
 
 # Create blocks
-blockA = OnlinePredictiveBlock(input_dim=obs_dim + latent_dim, latent_dim=latent_dim, device=device)
-blockB = OnlinePredictiveBlock(input_dim=latent_dim, latent_dim=latent_dim, device=device)
-blockC = OnlinePredictiveBlock(input_dim=latent_dim*2, latent_dim=latent_dim, device=device)
+blockA = OnlinePredictiveBlock(input_dim=obs_dim + latent_dim, depth_of_thought=latent_dim,
+                               device=device)
+blockB = OnlinePredictiveBlock(input_dim=latent_dim, depth_of_thought=latent_dim, device=device)
+blockC = OnlinePredictiveBlock(input_dim=latent_dim * 2, depth_of_thought=latent_dim, device=device)
 
 # Build the graph
 graph = WorldModelGraph()
@@ -52,13 +53,18 @@ graph.add_block('C', blockC, inputs=['A', 'B'])
 policy_block = PolicyBlock(latent_dim, action_dim).to(device)
 value_block = ValueBlock(latent_dim).to(device)
 
+# Sensor block requires input of obs_dim and outputs depth_of_thought
+sensor_block = nn.Sequential(
+    nn.Conv1d(1, out_channels=depth_of_thought, kernel_size=3),
+    nn.ReLU(),
+)
 # --- Step 2: Simple training loop on environment rollouts ---
 
 # Combine all params in single optimizer for simplicity
 optimizer = optim.Adam(list(policy_block.parameters()) +
-                       list(value_block.parameters()),
+                       list(value_block.parameters()) +
+                       list(sensor_block.parameters()),
                        lr=1e-4)
-
 
 loss_fn = nn.MSELoss()
 
@@ -85,7 +91,7 @@ for ep in range(num_episodes):
     graph.outputs[-1] = {}
     graph.predictions[-1] = {}
     # Initialize latents for A, B, C at t=-1 as zero to break the chain:
-    init_latent = torch.zeros((1, latent_dim), device=device)
+    init_latent = torch.zeros((1, 6, latent_dim), device=device)
     graph.outputs[-1]['A'] = init_latent
     graph.outputs[-1]['B'] = init_latent
     graph.outputs[-1]['C'] = init_latent
@@ -97,8 +103,14 @@ for ep in range(num_episodes):
     for t in range(max_steps):
         # Prepare inputs
         inputs_dict = graph.prepare_inputs_for_timestep(t)
+
+        enriched_from_sensor = sensor_block(obs.unsqueeze(1)).permute(0, 2, 1)  # reshape to
+        # [1,
+        # obs_dim,
+        # depth_of_thought]
+
         # For A: concatenate obs_t with C_{t-1}
-        a_input = torch.cat([obs, inputs_dict['A']], dim=-1)
+        a_input = torch.cat([enriched_from_sensor, inputs_dict['A']], dim=-1)
         inputs_dict['A'] = a_input
 
         # Forward timestep in the graph
@@ -137,10 +149,10 @@ for ep in range(num_episodes):
     for r in reversed(rewards):
         G = r.item() + gamma * G
         returns.insert(0, G)
-    returns = torch.tensor(returns, dtype=torch.float32, device=device).unsqueeze(1) # [T, 1]
+    returns = torch.tensor(returns, dtype=torch.float32, device=device).unsqueeze(1)  # [T, 1]
 
-    values = torch.cat(values, dim=0) # [T, 1]
-    log_probs = torch.cat(log_probs, dim=0) # [T]
+    values = torch.cat(values, dim=0)  # [T, 1]
+    log_probs = torch.cat(log_probs, dim=0)  # [T]
 
     # Advantage = returns - values
     advantages = returns - values.detach()
@@ -164,6 +176,5 @@ for ep in range(num_episodes):
           f"={returns.sum().item():.2f}, "
           f"Policy Loss"
           f"={policy_loss.item():.4f}, Value Loss={value_loss.item():.4f}")
-
 
 env.close()

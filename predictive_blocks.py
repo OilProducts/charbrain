@@ -34,13 +34,15 @@ class OnlinePredictiveBlock(nn.Module):
         self.encoderlayer = nn.TransformerEncoderLayer(d_model=self.depth_of_thought,
                                                        nhead=1,
                                                        bias=False,
-                                                       dim_feedforward=64)
+                                                       dim_feedforward=64,
+                                                       batch_first=True)
         self.encoder = nn.TransformerEncoder(self.encoderlayer, num_layers=2)
 
         self.decoder = nn.TransformerDecoderLayer(d_model=self.depth_of_thought,
                                                   nhead=1,
                                                   bias=False,
-                                                  dim_feedforward=64)
+                                                  dim_feedforward=64,
+                                                  batch_first=True)
 
 
 
@@ -60,39 +62,39 @@ class OnlinePredictiveBlock(nn.Module):
         self.loss_fn = nn.MSELoss()
 
 
-def forward(self, x_t: torch.Tensor) -> torch.Tensor:
-    """
-    x_t: shape [batch_size, input_dim], the current ground-truth input.
+    def forward(self, x_t: torch.Tensor) -> torch.Tensor:
+        """
+        x_t: shape [batch_size, input_dim], the current ground-truth input.
 
-    Returns:
-        z_t: shape [batch_size, latent_dim], the latent representation for the current input.
+        Returns:
+            z_t: shape [batch_size, latent_dim], the latent representation for the current input.
 
-    Internally:
-        - If self.last_pred is not None, compute loss = MSE(self.last_pred, x_t)
-          and do one optimizer step.
-        - Then encode x_t into latent z_t.
-        - Also produce a new "next input" prediction x_pred_tplus1 = decoder(z_t),
-          store it as self.last_pred for next time's training.
-    """
-    # 1) Train on the previous step's prediction if available
-    if self.last_pred is not None:
-        loss = self.loss_fn(self.last_pred, x_t)
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        Internally:
+            - If self.last_pred is not None, compute loss = MSE(self.last_pred, x_t)
+              and do one optimizer step.
+            - Then encode x_t into latent z_t.
+            - Also produce a new "next input" prediction x_pred_tplus1 = decoder(z_t),
+              store it as self.last_pred for next time's training.
+        """
+        # 1) Train on the previous step's prediction if available
+        if self.last_pred is not None:
+            loss = self.loss_fn(self.last_pred, x_t)
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
 
-    # 2) Encode x_t into latent representation z_t
-    z_t = self.encoder(x_t)
+        # 2) Encode x_t into latent representation z_t
+        z_t = self.encoder(x_t)
 
-    # # 3) Predict next input from z_t (for the next step's training)
-    # x_pred_tplus1 = self.decoder(z_t)
-    # # Detach so we don't accumulate a huge graph over many timesteps
-    # self.last_pred = x_pred_tplus1.detach()
+        # # 3) Predict next input from z_t (for the next step's training)
+        # x_pred_tplus1 = self.decoder(z_t)
+        # # Detach so we don't accumulate a huge graph over many timesteps
+        # self.last_pred = x_pred_tplus1.detach()
 
-    self.last_pred = self.decoder(z_t)
+        self.last_pred = self.decoder(z_t)
 
-    # 4) Return the latent representation
-    return z_t.detach()
+        # 4) Return the latent representation
+        return z_t.detach()
 
 
 class PolicyBlock(nn.Module):
