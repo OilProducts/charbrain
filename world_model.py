@@ -32,7 +32,8 @@ class TwoForwardOneBackBlock(nn.Module):
         if self.last_pred is not None:
             loss = self.loss_fn(self.last_pred, x_t)
             self.optimizer.zero_grad()
-            loss.backward(retain_graph=not self.is_outer)
+            loss.backward(retain_graph=True)
+            #loss.backward(retain_graph=not self.is_outer)
             self.optimizer.step()
 
         # 2) Encode x_t into latent representation z_t

@@ -3,25 +3,56 @@ import torch.nn as nn
 import torch.optim as optim
 from typing import List, Dict
 
+class AttentionBlock(nn.Module):
+    def __init__(self, output_length=8, d_model=16, n_heads=1, dim_feedforward=64,
+                 dropout=0.1, device='cpu'):
+        super().__init__()
+
+        # Learned queries for attention-based reduction
+        self.query_embed = nn.Parameter(torch.randn(output_length, d_model)).to(device)
+
+        # Multihead Attention
+        self.mha = nn.MultiheadAttention(embed_dim=d_model, num_heads=n_heads, batch_first=True).to(device)
+
+        # Add normalization
+        self.norm1 = nn.LayerNorm(d_model).to(device)
+
+        # Feed-forward network
+        self.ffn = nn.Sequential(
+            nn.Linear(d_model, dim_feedforward),
+            nn.ReLU(),
+            nn.Linear(dim_feedforward, d_model),
+            nn.ReLU()
+        ).to(device)
+
+        self.norm2 = nn.LayerNorm(d_model).to(device)
+
+        # Optional dropout
+        self.dropout = nn.Dropout(dropout).to(device)
+
+    def forward(self, x):
+        # x: (batch, input_length, d_model)
+        batch_size = x.size(0)
+
+        # Repeat queries for each batch
+        queries = self.query_embed.unsqueeze(0).expand(batch_size, -1, -1)
+
+        # Multihead Attention
+        attended, _ = self.mha(queries, x, x)
+        attended = self.dropout(attended)
+        attended = self.norm1(attended)  # Normalize after attention
+
+        # Feed-forward
+        ff_output = self.ffn(attended)
+        ff_output = self.dropout(ff_output)
+
+        # Add & Norm
+        output = self.norm2(attended + ff_output)
+
+        # output: (batch, output_length, d_model)
+        return output
 
 class OnlinePredictiveBlock(nn.Module):
-    """
-    A predictive block that:
-      - At each forward pass, returns a latent representation for the current input x_t.
-      - Internally, it still *predicts* x_{t+1} for the purpose of computing an auto-prediction loss,
-        but it does not return that prediction.
-      - The next time forward(x_t+1) is called, it backpropagates based on the mismatch between
-        the *previous* prediction (stored in self.last_pred) and the *current* ground truth input x_t+1.
-      - End result: you get a trained latent representation each step without externally passing around
-        the "next input" prediction.
-
-    forward(x_t):
-      1) If self.last_pred is not None, compute MSE(last_pred, x_t) -> backprop + step.
-      2) Encode x_t -> latent z_t
-      3) Produce a new prediction of x_{t+1}, store it as self.last_pred (internally).
-      4) Return z_t (the block’s latent representation).
-    """
-
     def __init__(self, input_dim, token_depth, learning_rate=1e-3, device='cpu'):
         super().__init__()
         self.device = device
@@ -44,16 +75,6 @@ class OnlinePredictiveBlock(nn.Module):
                                                   dim_feedforward=self.token_depth,
                                                   batch_first=True)
 
-
-
-        # self.encoder = nn.Sequential(
-        #     nn.Linear(input_dim, latent_dim),
-        #     nn.ReLU(),
-        #     nn.Linear(latent_dim, latent_dim),
-        #     nn.ReLU()
-        # )
-        # self.decoder = nn.Linear(latent_dim, self.output_dim)
-
         # Maintain the last prediction of x_t (used for training at the next forward call)
         self.last_pred = None
         self.last_latent = None
@@ -64,19 +85,6 @@ class OnlinePredictiveBlock(nn.Module):
 
 
     def forward(self, x_t: torch.Tensor) -> torch.Tensor:
-        """
-        x_t: shape [batch_size, input_dim], the current ground-truth input.
-
-        Returns:
-            z_t: shape [batch_size, latent_dim], the latent representation for the current input.
-
-        Internally:
-            - If self.last_pred is not None, compute loss = MSE(self.last_pred, x_t)
-              and do one optimizer step.
-            - Then encode x_t into latent z_t.
-            - Also produce a new "next input" prediction x_pred_tplus1 = decoder(z_t),
-              store it as self.last_pred for next time's training.
-        """
         # 1) Train on the previous step's prediction if available
         if self.last_pred is not None:
             loss = self.loss_fn(self.last_pred, x_t)
@@ -88,10 +96,6 @@ class OnlinePredictiveBlock(nn.Module):
         z_t = self.encoder(x_t)
 
         # # 3) Predict next input from z_t (for the next step's training)
-        # x_pred_tplus1 = self.decoder(z_t)
-        # # Detach so we don't accumulate a huge graph over many timesteps
-        # self.last_pred = x_pred_tplus1.detach()
-
         self.last_pred = self.decoder(z_t)
         self.last_latent = z_t
 
