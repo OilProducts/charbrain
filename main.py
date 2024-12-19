@@ -6,7 +6,7 @@ import gymnasium as gym
 from typing import Dict, List
 
 from predictive_blocks import OnlinePredictiveBlock, PolicyBlock, ValueBlock
-from world_model import WorldModelGraph
+from world_model import WorldModelGraph, TwoForwardOneBackBlock
 from utils import MovingAverage
 
 # Assuming PredictiveBlock and WorldModelGraph are already defined as above.
@@ -32,13 +32,17 @@ hidden_dim = 32
 print(f"Observation dim: {obs_dim}, Action dim: {action_dim}")
 
 # Create blocks
-blockA = OnlinePredictiveBlock(input_dim=obs_dim + latent_dim, depth_of_thought=latent_dim,
+blockA = OnlinePredictiveBlock(input_dim=obs_dim + latent_dim, token_depth=latent_dim,
                                device=device)
-blockB = OnlinePredictiveBlock(input_dim=latent_dim, depth_of_thought=latent_dim, device=device)
-blockC = OnlinePredictiveBlock(input_dim=latent_dim * 2, depth_of_thought=latent_dim, device=device)
+blockB = OnlinePredictiveBlock(input_dim=latent_dim, token_depth=latent_dim, device=device)
+blockC = OnlinePredictiveBlock(input_dim=latent_dim * 2, token_depth=latent_dim, device=device)
+
 
 # Build the graph
 graph = WorldModelGraph()
+
+block_factory = lambda: OnlinePredictiveBlock(input_dim=obs_dim, token_depth=latent_dim, device=device)
+model = TwoForwardOneBackBlock(block_factory, lr=1e-3, is_outer=True)
 
 # Add the blocks to the graph:
 # A depends on C(t-1) and also takes direct env input at each timestep.
@@ -50,8 +54,8 @@ graph.add_block('B', blockB, inputs=['A'])
 graph.add_block('C', blockC, inputs=['A', 'B'])
 
 # Policy and Value blocks:
-policy_block = PolicyBlock(latent_dim, action_dim).to(device)
-value_block = ValueBlock(latent_dim).to(device)
+policy_block = PolicyBlock(latent_dim * 6 * 2, action_dim).to(device)
+value_block = ValueBlock(latent_dim * 6 * 2).to(device)
 
 # Sensor block requires input of obs_dim and outputs depth_of_thought
 sensor_block = nn.Sequential(
@@ -92,9 +96,9 @@ for ep in range(num_episodes):
     graph.predictions[-1] = {}
     # Initialize latents for A, B, C at t=-1 as zero to break the chain:
     init_latent = torch.zeros((1, 6, latent_dim), device=device)
-    graph.outputs[-1]['A'] = init_latent
-    graph.outputs[-1]['B'] = init_latent
-    graph.outputs[-1]['C'] = init_latent
+    graph.blocks['A'].last_latent = init_latent
+    graph.blocks['B'].last_latent = init_latent
+    graph.blocks['C'].last_latent = init_latent
 
     log_probs = []
     values = []
@@ -102,7 +106,7 @@ for ep in range(num_episodes):
 
     for t in range(max_steps):
         # Prepare inputs
-        inputs_dict = graph.prepare_inputs_for_timestep(t)
+        # inputs_dict = graph.prepare_inputs_for_timestep(t) /
 
         enriched_from_sensor = sensor_block(obs.unsqueeze(1)).permute(0, 2, 1)  # reshape to
         # [1,
@@ -110,18 +114,21 @@ for ep in range(num_episodes):
         # depth_of_thought]
 
         # For A: concatenate obs_t with C_{t-1}
-        a_input = torch.cat([enriched_from_sensor, inputs_dict['A']], dim=-1)
-        inputs_dict['A'] = a_input
+        # a_input = torch.cat([enriched_from_sensor, inputs_dict['A']], dim=1)
+        # inputs_dict['A'] = a_input
 
         # Forward timestep in the graph
-        graph.forward_timestep(t, inputs_dict)
+        # graph.forward_timestep(t, inputs_dict)
+
+
+        out = model.forward(enriched_from_sensor)
 
         # Use block A's latent as state representation for policy and value
-        latent_A_t = graph.get_outputs(t)['A']  # shape [1, latent_dim]
-
+        # latent_A_t = graph.get_outputs(t)['A']  # shape [1, latent_dim, depth_of_thought]
+        # latent_B_t = graph.get_outputs(t)['B']
         # Compute policy and value
-        action_logits = policy_block(latent_A_t)
-        value_pred = value_block(latent_A_t)  # shape [1, 1]
+        action_logits = policy_block(out.flatten(1))
+        value_pred = value_block(out.flatten(1))  # shape [1, 1]
 
         # Sample action
         dist = Categorical(logits=action_logits)

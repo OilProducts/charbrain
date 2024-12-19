@@ -22,26 +22,26 @@ class OnlinePredictiveBlock(nn.Module):
       4) Return z_t (the block’s latent representation).
     """
 
-    def __init__(self, input_dim, depth_of_thought, learning_rate=1e-3, device='cpu'):
+    def __init__(self, input_dim, token_depth, learning_rate=1e-3, device='cpu'):
         super().__init__()
         self.device = device
         self.input_dim = input_dim
-        self.depth_of_thought = depth_of_thought
+        self.token_depth = token_depth
         self.output_dim = input_dim
 
         # Example architecture: simple MLP
         # encoder to produce latent, decoder to produce the next input prediction
-        self.encoderlayer = nn.TransformerEncoderLayer(d_model=self.depth_of_thought,
+        self.encoderlayer = nn.TransformerEncoderLayer(d_model=self.token_depth,
                                                        nhead=1,
                                                        bias=False,
-                                                       dim_feedforward=64,
+                                                       dim_feedforward=self.token_depth,
                                                        batch_first=True)
         self.encoder = nn.TransformerEncoder(self.encoderlayer, num_layers=2)
 
-        self.decoder = nn.TransformerDecoderLayer(d_model=self.depth_of_thought,
+        self.decoder = nn.TransformerEncoderLayer(d_model=self.token_depth,
                                                   nhead=1,
                                                   bias=False,
-                                                  dim_feedforward=64,
+                                                  dim_feedforward=self.token_depth,
                                                   batch_first=True)
 
 
@@ -56,6 +56,7 @@ class OnlinePredictiveBlock(nn.Module):
 
         # Maintain the last prediction of x_t (used for training at the next forward call)
         self.last_pred = None
+        self.last_latent = None
 
         # Internal optimizer
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
@@ -92,9 +93,10 @@ class OnlinePredictiveBlock(nn.Module):
         # self.last_pred = x_pred_tplus1.detach()
 
         self.last_pred = self.decoder(z_t)
+        self.last_latent = z_t
 
         # 4) Return the latent representation
-        return z_t.detach()
+        return self.last_latent
 
 
 class PolicyBlock(nn.Module):
