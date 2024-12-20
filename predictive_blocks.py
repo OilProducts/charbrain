@@ -30,7 +30,7 @@ class AttentionBlock(nn.Module):
         # Optional dropout
         self.dropout = nn.Dropout(dropout).to(device)
 
-    def forward(self, x):
+    def forward(self, x): # x: (batch, d_model, input_length)
         # x: (batch, input_length, d_model)
         batch_size = x.size(0)
 
@@ -39,12 +39,12 @@ class AttentionBlock(nn.Module):
 
         # Multihead Attention
         attended, _ = self.mha(queries, x, x)
-        attended = self.dropout(attended)
+        # attended = self.dropout(attended)
         attended = self.norm1(attended)  # Normalize after attention
 
         # Feed-forward
         ff_output = self.ffn(attended)
-        ff_output = self.dropout(ff_output)
+        # ff_output = self.dropout(ff_output)
 
         # Add & Norm
         output = self.norm2(attended + ff_output)
