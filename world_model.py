@@ -7,7 +7,7 @@ from predictive_blocks import OnlinePredictiveBlock
 
 
 class TwoForwardOneBackBlock(nn.Module):
-    def __init__(self, block_factory, lr=1e-3, is_outer=False, token_depth=16):
+    def __init__(self, block_factory, lr=1e-4, is_outer=False, token_depth=16):
         super().__init__()
         self.learning_rate = lr
 

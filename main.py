@@ -5,8 +5,8 @@ from torch.distributions import Categorical
 import gymnasium as gym
 from typing import Dict, List
 
-from predictive_blocks import OnlinePredictiveBlock, PolicyBlock, ValueBlock, AttentionBlock
-from world_model import WorldModelGraph, TwoForwardOneBackBlock
+from predictive_blocks import PolicyBlock, ValueBlock, AttentionBlock
+from world_model import TwoForwardOneBackBlock
 from utils import MovingAverage
 
 torch.autograd.set_detect_anomaly(True)
@@ -47,7 +47,7 @@ print(f"Observation dim: {obs_dim}, Action dim: {action_dim}")
 # graph = WorldModelGraph()
 
 block_factory = lambda: AttentionBlock(d_model=latent_dim, output_length=8, device=device)
-model = TwoForwardOneBackBlock(block_factory, lr=1e-3, is_outer=True)
+model = TwoForwardOneBackBlock(block_factory, lr=1e-5, is_outer=True)
 model.to(device)
 
 # Policy and Value blocks:
@@ -65,7 +65,7 @@ sensor_block = nn.Sequential(
 optimizer = optim.Adam(list(policy_block.parameters()) +
                        list(value_block.parameters()) +
                        list(sensor_block.parameters()),
-                       lr=1e-4)
+                       lr=1e-5)
 
 loss_fn = nn.MSELoss()
 
@@ -116,7 +116,8 @@ for ep in range(num_episodes):
             break
 
     # Compute returns and advantages
-    ma.add_value(sum(rewards).item())
+    total_reward = sum(rewards).item()
+    ma.add_value(total_reward)
     returns = []
     G = 0
     for r in reversed(rewards):
@@ -145,7 +146,7 @@ for ep in range(num_episodes):
     loss.backward()
     optimizer.step()
 
-    print(f"Episode {ep}: Reward MA={ma}, Return"
+    print(f"Episode {ep}: Reward={total_reward}, Reward MA={ma}, Return"
           f"={returns.sum().item():.2f}, "
           f"Policy Loss"
           f"={policy_loss.item():.4f}, Value Loss={value_loss.item():.4f}")
